@@ -9,17 +9,64 @@ jobs:
   historical:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      - run: pip install -r requirements.txt
-      - name: Credentials
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create Google credentials
         run: |
           mkdir -p credentials
           echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > credentials/service_account.json
+
+      - name: Debug files
+        run: |
+          echo "========================================"
+          echo "CURRENT DIRECTORY"
+          echo "========================================"
+          pwd
+
+          echo ""
+          echo "========================================"
+          echo "ROOT FILES"
+          echo "========================================"
+          ls -la
+
+          echo ""
+          echo "========================================"
+          echo "DATA DIRECTORY"
+          echo "========================================"
+          ls -la data
+
+          echo ""
+          echo "========================================"
+          echo "CHECKING EXCEL FILE"
+          echo "========================================"
+
+          if test -f data/symbols.xlsx; then
+            echo "FOUND: data/symbols.xlsx"
+            ls -lh data/symbols.xlsx
+          else
+            echo "NOT FOUND: data/symbols.xlsx"
+            exit 1
+          fi
+
+          echo ""
+          echo "========================================"
+          echo "CHECKING PYTHON FILES"
+          echo "========================================"
+          ls -lh main_historical.py
+          ls -lh config.py
+
       - name: Run historical update
         env:
           DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
