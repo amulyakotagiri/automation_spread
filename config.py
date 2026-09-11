@@ -18,7 +18,7 @@ SPREADSHEET_IDS = {
 }
 
 # Data
-SYMBOLS_FILE = "data/DataAnalysis.xlsx"
+SYMBOLS_FILE = "data/symbols.xlsx"
 HISTORY_DAYS = 180
 ATR_PERIOD = 14
 BATCH_SIZE = 70
