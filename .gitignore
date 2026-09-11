@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+output/
+*.xlsx
+*.csv
+!data/symbols.csv
+.DS_Store
