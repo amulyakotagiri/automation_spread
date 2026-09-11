@@ -4,7 +4,7 @@ __pycache__/
 .venv/
 venv/
 output/
-*.xlsx
+
 *.csv
 !data/symbols.csv
 .DS_Store
