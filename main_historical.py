@@ -139,11 +139,17 @@ def main():
     total_skipped = 0
     total_errors = 0
 
+    category_idx = 0
     for category, symbols in categories.items():
         sheet_id = config.SPREADSHEET_IDS.get(category)
         if not sheet_id:
             print(f"\nSkipping {category} - no Spreadsheet ID configured.")
             continue
+
+        category_idx += 1
+        if category_idx > 1:
+            print("\nCooling down for 10s between categories to reset Google API quotas...")
+            time.sleep(10)
 
         print(f"\n{'='*20} Processing {category} ({len(symbols)} stocks) {'='*20}")
         print(f"Connecting to Google Spreadsheet ID: {sheet_id}...")
