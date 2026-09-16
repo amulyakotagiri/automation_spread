@@ -182,8 +182,9 @@ def main():
             last_close = hist["close"].iloc[-1] if not hist["close"].empty else None
             atr_pct = (atr / last_close * 100) if (atr and not np.isnan(atr) and last_close) else None
 
+            is_new = False
             try:
-                save_stock_historical(
+                is_new = save_stock_historical(
                     sh=sh,
                     worksheet_map=worksheet_map,
                     symbol=sym,
@@ -196,13 +197,14 @@ def main():
                 cat_success += 1
                 vol_str = f"{volatility:.2f}%" if (volatility is not None and not np.isnan(volatility)) else "N/A"
                 atr_str = f"{atr:.2f}" if (atr is not None and not np.isnan(atr)) else "N/A"
-                print(f"  [{i}/{len(symbols)}] {sym} -> UPDATED (Vol: {vol_str}, ATR: {atr_str})")
+                status_tag = "CREATED & UPDATED" if is_new else "UPDATED"
+                print(f"  [{i}/{len(symbols)}] {sym} -> {status_tag} (Vol: {vol_str}, ATR: {atr_str})")
             except Exception as e:
                 print(f"  [{i}/{len(symbols)}] {sym} -> ERROR updating sheet: {e}")
                 cat_errors += 1
 
-            # Sleep 1.05s between writes to respect Google Sheets' 60 writes/minute quota
-            time.sleep(1.05)
+            # Sleep 2.0s for newly created sheets (header + freeze), or 1.1s for simple B2:B7 updates
+            time.sleep(2.0 if is_new else 1.1)
 
         print(f"\nSummary for {category}:")
         print(f"  Successfully updated: {cat_success}")
