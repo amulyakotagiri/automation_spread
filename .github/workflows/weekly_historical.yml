@@ -34,6 +34,34 @@ jobs:
           fi
           echo "$GOOGLE_SERVICE_ACCOUNT_JSON" > credentials/service_account.json
 
+      - name: Validate required secrets
+        env:
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+          SHEET_ID_MIDCAP: ${{ secrets.SHEET_ID_MIDCAP }}
+          SHEET_ID_RANGE: ${{ secrets.SHEET_ID_RANGE }}
+          SHEET_ID_SMALLCAP: ${{ secrets.SHEET_ID_SMALLCAP }}
+        run: |
+          echo "Checking required GitHub Secrets..."
+          ERRORS=0
+          if [ -z "$DHAN_CLIENT_ID" ]; then
+            echo "::error::Secret DHAN_CLIENT_ID is missing or empty in GitHub Secrets!"
+            ERRORS=1
+          fi
+          if [ -z "$DHAN_ACCESS_TOKEN" ]; then
+            echo "::error::Secret DHAN_ACCESS_TOKEN is missing or empty in GitHub Secrets!"
+            ERRORS=1
+          fi
+          if [ -z "$SHEET_ID_MIDCAP" ] && [ -z "$SHEET_ID_RANGE" ] && [ -z "$SHEET_ID_SMALLCAP" ]; then
+            echo "::error::At least one spreadsheet ID (SHEET_ID_MIDCAP, SHEET_ID_RANGE, or SHEET_ID_SMALLCAP) must be set in GitHub Secrets!"
+            ERRORS=1
+          fi
+          if [ "$ERRORS" -eq 1 ]; then
+            exit 1
+          fi
+          echo "Required secrets validated successfully."
+
+
       - name: Debug files
         run: |
           echo "========================================"

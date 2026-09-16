@@ -8,3 +8,5 @@ output/
 *.csv
 !data/symbols.csv
 .DS_Store
+credentials/
+*.json

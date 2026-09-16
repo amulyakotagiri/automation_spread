@@ -40,21 +40,27 @@ def fetch_history(dhan, security_id: str) -> pd.DataFrame:
     to_dt = datetime.now().date()
     from_dt = to_dt - timedelta(days=config.HISTORY_DAYS)
     try:
-        data = dhan.historical_daily_data(
+        resp = dhan.historical_daily_data(
             security_id=str(security_id),
             exchange_segment="NSE_EQ",
             instrument_type="EQUITY",
             from_date=from_dt.strftime("%Y-%m-%d"),
             to_date=to_dt.strftime("%Y-%m-%d")
         )
-        if not data or "close" not in data:
+        if not resp:
+            return pd.DataFrame()
+        data = resp.get("data", resp) if isinstance(resp, dict) else resp
+        if not isinstance(data, dict):
+            return pd.DataFrame()
+        norm = {str(k).lower(): v for k, v in data.items()}
+        if "close" not in norm or not norm["close"]:
             return pd.DataFrame()
         return pd.DataFrame({
-            "open": data["open"],
-            "high": data["high"],
-            "low": data["low"],
-            "close": data["close"],
-            "volume": data["volume"]
+            "open": norm.get("open", []),
+            "high": norm.get("high", []),
+            "low": norm.get("low", []),
+            "close": norm.get("close", []),
+            "volume": norm.get("volume", [])
         })
     except Exception as e:
         print(f"  History error {security_id}: {e}")
