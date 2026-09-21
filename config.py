@@ -23,3 +23,7 @@ HISTORY_DAYS = 180
 ATR_PERIOD = 14
 BATCH_SIZE = 70
 BATCH_SIZE_QUOTES = 70   # <-- added (was missing)
+
+# Airtable
+AIRTABLE_TOKEN   = os.getenv("AIRTABLE_TOKEN")
+AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
