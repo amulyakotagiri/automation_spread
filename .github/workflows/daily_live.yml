@@ -1,0 +1,46 @@
+name: Daily Live Bid-Ask Snapshot
+
+on:
+  schedule:
+    # 5:30 IST = 00:00 UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:   # allows manual trigger
+
+jobs:
+  live-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create Google credentials
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          mkdir -p credentials
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::Secret GOOGLE_SERVICE_ACCOUNT_JSON is missing or empty!"
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICE_ACCOUNT_JSON" > credentials/service_account.json
+
+      - name: Run live snapshot
+        env:
+          DHAN_CLIENT_ID: ${{ secrets.DHAN_CLIENT_ID }}
+          DHAN_ACCESS_TOKEN: ${{ secrets.DHAN_ACCESS_TOKEN }}
+          SHEET_ID_MIDCAP: ${{ secrets.SHEET_ID_MIDCAP }}
+          SHEET_ID_RANGE: ${{ secrets.SHEET_ID_RANGE }}
+          SHEET_ID_SMALLCAP: ${{ secrets.SHEET_ID_SMALLCAP }}
+          GOOGLE_CREDENTIALS_FILE: credentials/service_account.json
+        run: python main_live.py
