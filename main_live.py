@@ -1,7 +1,5 @@
 """
-Live Bid-Ask snapshot.
-Appends one row per stock into its individual sheet.
-Spread = Ask - Bid
+Live Bid-Ask snapshot → writes to Airtable
 """
 import time
 from datetime import datetime
@@ -10,7 +8,7 @@ import pandas as pd
 from dhanhq import DhanContext, dhanhq
 import config
 from utils.security_master import get_symbol_map
-from utils.google_sheets import get_client, get_or_create_stock_sheet, append_live_row
+from utils.airtable_helper import upsert_live_records
 
 def load_symbols_by_category():
     xls = pd.ExcelFile(config.SYMBOLS_FILE)
@@ -31,12 +29,7 @@ def load_symbols_by_category():
         for col in df.columns:
             if str(col).strip().upper() in ["SYMBOL", "SYMBOLS"]:
                 symbols = (
-                    df[col]
-                    .dropna()
-                    .astype(str)
-                    .str.strip()
-                    .str.upper()
-                    .tolist()
+                    df[col].dropna().astype(str).str.strip().str.upper().tolist()
                 )
                 categories[cat].extend(symbols)
                 break
@@ -44,6 +37,20 @@ def load_symbols_by_category():
     for cat in categories:
         categories[cat] = sorted(list(set(categories[cat])))
     return categories
+
+def safe_quote(dhan, batch):
+    try:
+        resp = dhan.quote_data(securities={"NSE_EQ": batch})
+        if isinstance(resp, str):
+            print(f"  Dhan returned string: {resp[:150]}")
+            return {}
+        if not isinstance(resp, dict):
+            return {}
+        data = resp.get("data", resp)
+        return data if isinstance(data, dict) else {}
+    except Exception as e:
+        print(f"  Quote exception: {e}")
+        return {}
 
 def main():
     ist = pytz.timezone("Asia/Kolkata")
@@ -56,40 +63,32 @@ def main():
     dhan = dhanhq(DhanContext(config.DHAN_CLIENT_ID, config.DHAN_ACCESS_TOKEN))
     symbol_map = get_symbol_map()
     categories = load_symbols_by_category()
-    client = get_client()
+
+    all_records = []
 
     for category, symbols in categories.items():
-        sheet_id = config.SPREADSHEET_IDS.get(category)
-        if not sheet_id:
-            print(f"Skipping {category} — no spreadsheet ID")
-            continue
-
-        print(f"\n=== {category} ===")
+        print(f"\n=== {category} ({len(symbols)} symbols) ===")
 
         valid = [(sym, symbol_map[sym]) for sym in symbols if sym in symbol_map]
         sids = [sid for _, sid in valid]
 
-        # Batch quotes
+        # Fetch quotes
         quote_cache = {}
         for i in range(0, len(sids), config.BATCH_SIZE):
-            batch = sids[i : i + config.BATCH_SIZE]
-            try:
-                resp = dhan.quote_data(securities={"NSE_EQ": batch})
-                data = resp.get("data", resp) if isinstance(resp, dict) else {}
-                for sid, q in data.items():
-                    quote_cache[str(sid)] = q
-            except Exception as e:
-                print(f"Quote error: {e}")
-            time.sleep(0.35)
+            batch = sids[i:i + config.BATCH_SIZE]
+            data = safe_quote(dhan, batch)
+            for sid, q in data.items():
+                quote_cache[str(sid)] = q
+            time.sleep(0.4)
 
-        # Write to individual sheets
+        # Build records
         for sym, sid in valid:
             q = quote_cache.get(str(sid), {})
-            bid = None
-            ask = None
+
             ltp = q.get("last_price") or q.get("LTP") or q.get("ltp")
             volume = q.get("volume") or q.get("total_volume")
 
+            bid = ask = None
             depth = q.get("depth") or q.get("market_depth") or {}
             try:
                 if "buy" in depth and depth["buy"]:
@@ -99,18 +98,30 @@ def main():
             except Exception:
                 pass
 
-            # Correct spread calculation
             spread = round(ask - bid, 4) if (bid is not None and ask is not None) else None
 
-            try:
-                ws = get_or_create_stock_sheet(client, sheet_id, sym)
-                append_live_row(ws, snapshot_time, session, bid, ask, spread, ltp, volume)
-            except Exception as e:
-                print(f"  Write error {sym}: {e}")
+            all_records.append({
+                "Snapshot_Time": snapshot_time,
+                "Session": session,
+                "Category": category,
+                "SYMBOL": sym,
+                "security_id": str(sid),
+                "Bid": bid,
+                "Ask": ask,
+                "Spread": spread,
+                "LTP": ltp,
+                "Volume": volume,
+            })
 
-            time.sleep(0.08)
+        print(f"  Collected {len(valid)} rows for {category}")
 
-    print("Live snapshot completed.")
+    if not all_records:
+        print("No records to write.")
+        return
+
+    print(f"\nWriting {len(all_records)} total records to Airtable...")
+    upsert_live_records(all_records)
+    print("✓ Successfully written to Airtable")
 
 if __name__ == "__main__":
     main()
