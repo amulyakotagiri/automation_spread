@@ -7,3 +7,4 @@ gspread>=6.0.0
 google-auth>=2.0.0
 pytz>=2024.1
 requests>=2.31
+pyairtable>=2.3.3
