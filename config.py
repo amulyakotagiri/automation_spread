@@ -10,7 +10,7 @@ DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN")
 # Google
 GOOGLE_CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials/service_account.json")
 
-# Spreadsheet IDs (create 3 sheets and put their IDs here or as secrets)
+# Spreadsheet IDs
 SPREADSHEET_IDS = {
     "MidCap": os.getenv("SHEET_ID_MIDCAP", ""),
     "Range_100_1000": os.getenv("SHEET_ID_RANGE", ""),
@@ -22,3 +22,4 @@ SYMBOLS_FILE = "data/symbols.xlsx"
 HISTORY_DAYS = 180
 ATR_PERIOD = 14
 BATCH_SIZE = 70
+BATCH_SIZE_QUOTES = 70   # <-- added (was missing)
