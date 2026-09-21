@@ -1,9 +1,8 @@
 """
-Live Bid-Ask snapshot at the defined timestamps.
+Live Bid-Ask snapshot.
 Appends one row per stock into its individual sheet.
-Spread = Bid - Ask
+Spread = Ask - Bid
 """
-
 import time
 from datetime import datetime
 import pytz
@@ -18,11 +17,12 @@ def load_symbols_by_category():
     categories = {"MidCap": [], "Range_100_1000": [], "SmallCap": []}
 
     for sheet_name in xls.sheet_names:
-        if "midcap" in sheet_name.lower():
+        lower = sheet_name.lower()
+        if "midcap" in lower:
             cat = "MidCap"
-        elif "range" in sheet_name.lower():
+        elif "range" in lower:
             cat = "Range_100_1000"
-        elif "small" in sheet_name.lower():
+        elif "small" in lower:
             cat = "SmallCap"
         else:
             continue
@@ -30,7 +30,14 @@ def load_symbols_by_category():
         df = pd.read_excel(xls, sheet_name=sheet_name, header=1)
         for col in df.columns:
             if str(col).strip().upper() in ["SYMBOL", "SYMBOLS"]:
-                symbols = df[col].dropna().astype(str).str.strip().str.upper().tolist()
+                symbols = (
+                    df[col]
+                    .dropna()
+                    .astype(str)
+                    .str.strip()
+                    .str.upper()
+                    .tolist()
+                )
                 categories[cat].extend(symbols)
                 break
 
@@ -54,18 +61,18 @@ def main():
     for category, symbols in categories.items():
         sheet_id = config.SPREADSHEET_IDS.get(category)
         if not sheet_id:
+            print(f"Skipping {category} — no spreadsheet ID")
             continue
 
         print(f"\n=== {category} ===")
 
-        # Prepare security ids
         valid = [(sym, symbol_map[sym]) for sym in symbols if sym in symbol_map]
         sids = [sid for _, sid in valid]
 
         # Batch quotes
         quote_cache = {}
         for i in range(0, len(sids), config.BATCH_SIZE):
-            batch = sids[i:i+config.BATCH_SIZE]
+            batch = sids[i : i + config.BATCH_SIZE]
             try:
                 resp = dhan.quote_data(securities={"NSE_EQ": batch})
                 data = resp.get("data", resp) if isinstance(resp, dict) else {}
@@ -89,10 +96,11 @@ def main():
                     bid = depth["buy"][0].get("price")
                 if "sell" in depth and depth["sell"]:
                     ask = depth["sell"][0].get("price")
-            except:
+            except Exception:
                 pass
 
-            spread = round(bid - ask, 4) if (bid is not None and ask is not None) else None
+            # Correct spread calculation
+            spread = round(ask - bid, 4) if (bid is not None and ask is not None) else None
 
             try:
                 ws = get_or_create_stock_sheet(client, sheet_id, sym)
