@@ -44,12 +44,22 @@ def get_or_create_spreadsheet(client, title: str, spreadsheet_id: str = ""):
             return client.open_by_key(f["id"])
 
     print(f"  [SHEETS] Creating new spreadsheet: {title}", flush=True)
+
+    # If DRIVE_FOLDER_ID is set (a folder you've already shared with the
+    # service account, Editor access), create the new spreadsheet inside
+    # it directly — it inherits the folder's sharing and shows up in your
+    # Drive immediately, no extra per-file share call needed.
+    folder_id = getattr(config, "DRIVE_FOLDER_ID", "")
+    if folder_id:
+        sh = client.create(title, folder_id=folder_id)
+        print(f"  [SHEETS] Created '{title}' inside shared folder", flush=True)
+        return sh
+
     sh = client.create(title)
 
+    # No shared folder configured — fall back to sharing the file itself.
     # Newly created spreadsheets are owned by the service account and
-    # invisible in YOUR Drive/browser unless shared. If you set
-    # SHARE_WITH_EMAIL (your Google account email) in config/secrets,
-    # this shares it with you automatically as a writer.
+    # invisible in YOUR Drive/browser unless shared.
     if getattr(config, "SHARE_WITH_EMAIL", ""):
         try:
             sh.share(config.SHARE_WITH_EMAIL, perm_type="user", role="writer")
@@ -58,8 +68,8 @@ def get_or_create_spreadsheet(client, title: str, spreadsheet_id: str = ""):
             print(f"  [SHEETS] Could not auto-share '{title}': {e}", flush=True)
     else:
         print(f"  [SHEETS] NOTE: '{title}' was created by the service account and "
-              f"won't show up in your own Drive unless you set SHARE_WITH_EMAIL "
-              f"or manually share it: {sh.url}", flush=True)
+              f"won't show up in your own Drive unless you set DRIVE_FOLDER_ID or "
+              f"SHARE_WITH_EMAIL, or manually share it: {sh.url}", flush=True)
 
     return sh
 
