@@ -9,20 +9,67 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
+
 def get_client():
     creds = Credentials.from_service_account_file(
         config.GOOGLE_CREDENTIALS_FILE, scopes=SCOPES
     )
     return gspread.authorize(creds)
 
-def get_or_create_stock_sheet(client, spreadsheet_id: str, symbol: str):
-    sh = client.open_by_key(spreadsheet_id)
+
+def get_or_create_spreadsheet(client, title: str, spreadsheet_id: str = ""):
+    """
+    Resolve a top-level spreadsheet without requiring a pre-created,
+    manually-copied ID:
+      1. If a spreadsheet_id is given (e.g. from a secret) and it's
+         still accessible, use it.
+      2. Otherwise search the service account's Drive for a spreadsheet
+         with this exact title and use it if found.
+      3. Otherwise create a new spreadsheet with this title.
+
+    This means SHEET_ID_MIDCAP/RANGE/SMALLCAP become OPTIONAL — you can
+    drop them from secrets entirely and the script will find or create
+    the right spreadsheet by name every run.
+    """
+    if spreadsheet_id:
+        try:
+            return client.open_by_key(spreadsheet_id)
+        except gspread.exceptions.APIError:
+            print(f"  [SHEETS] Provided ID for '{title}' isn't accessible — "
+                  f"falling back to search/create by name", flush=True)
+
+    for f in client.list_spreadsheet_files():
+        if f["name"] == title:
+            print(f"  [SHEETS] Found existing spreadsheet: {title}", flush=True)
+            return client.open_by_key(f["id"])
+
+    print(f"  [SHEETS] Creating new spreadsheet: {title}", flush=True)
+    sh = client.create(title)
+
+    # Newly created spreadsheets are owned by the service account and
+    # invisible in YOUR Drive/browser unless shared. If you set
+    # SHARE_WITH_EMAIL (your Google account email) in config/secrets,
+    # this shares it with you automatically as a writer.
+    if getattr(config, "SHARE_WITH_EMAIL", ""):
+        try:
+            sh.share(config.SHARE_WITH_EMAIL, perm_type="user", role="writer")
+            print(f"  [SHEETS] Shared '{title}' with {config.SHARE_WITH_EMAIL}", flush=True)
+        except Exception as e:
+            print(f"  [SHEETS] Could not auto-share '{title}': {e}", flush=True)
+    else:
+        print(f"  [SHEETS] NOTE: '{title}' was created by the service account and "
+              f"won't show up in your own Drive unless you set SHARE_WITH_EMAIL "
+              f"or manually share it: {sh.url}", flush=True)
+
+    return sh
+
+
+def get_or_create_stock_sheet(spreadsheet, symbol: str):
+    """Get (or create) the worksheet for one stock within a spreadsheet."""
     try:
-        return sh.worksheet(symbol)
+        return spreadsheet.worksheet(symbol)
     except gspread.WorksheetNotFound:
-        # Create new sheet for this stock
-        ws = sh.add_worksheet(title=symbol, rows=500, cols=12)
-        # Write static header template
+        ws = spreadsheet.add_worksheet(title=symbol, rows=500, cols=12)
         header = [
             ["SYMBOL", symbol],
             ["Security_ID", ""],
@@ -38,6 +85,7 @@ def get_or_create_stock_sheet(client, spreadsheet_id: str, symbol: str):
         ws.freeze(rows=9)
         return ws
 
+
 def update_static_metrics(ws, security_id, volatility, atr, atr_pct, avg_vol):
     """Update the header section of a stock sheet"""
     from datetime import datetime
@@ -50,6 +98,7 @@ def update_static_metrics(ws, security_id, volatility, atr, atr_pct, avg_vol):
     ws.update("B5", [[round(atr, 2) if atr else ""]])
     ws.update("B6", [[round(atr_pct, 2) if atr_pct else ""]])
     ws.update("B7", [[int(avg_vol) if avg_vol else ""]])
+
 
 def append_live_row(ws, snapshot_time, session, bid, ask, spread, ltp, volume):
     """Append one live snapshot row"""
