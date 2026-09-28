@@ -9,13 +9,7 @@ from dhanhq import DhanContext, dhanhq
 import config
 from utils.security_master import get_symbol_map
 from utils.metrics import compute_atr, compute_volatility, compute_trend_score
-from utils.google_sheets import (
-    get_client,
-    get_or_create_spreadsheet,
-    get_or_create_stock_sheet,
-    update_static_metrics,
-    append_live_row,
-)
+from utils.bigquery_helper import write_snapshot_records, write_static_metrics
 
 
 def load_symbols_by_category() -> dict[str, list[str]]:
@@ -111,7 +105,7 @@ def main():
     categories = load_symbols_by_category()
 
     # Flatten to one list for batched quote fetching, but keep category
-    # alongside each symbol so we know which spreadsheet it belongs to.
+    # alongside each symbol so we know which category it belongs to.
     valid = []  # (symbol, security_id, category)
     for cat, symbols in categories.items():
         for sym in symbols:
@@ -143,17 +137,9 @@ def main():
             print(f"Quote batch error: {e}")
         time.sleep(0.4)
 
-    # ---- Resolve (or auto-create) each category's spreadsheet once ----
-    client = get_client()
-    spreadsheets = {}
-    for cat in categories:
-        spreadsheets[cat] = get_or_create_spreadsheet(
-            client,
-            title=config.SPREADSHEET_TITLES[cat],
-            spreadsheet_id=config.SPREADSHEET_IDS.get(cat, "")
-        )
-
-    # ---- Process each stock: update its own worksheet ----
+    # ---- Process each stock and collect records ----
+    snapshot_records = []
+    static_records = []
     fetch_failures = 0
     processed = 0
 
@@ -188,21 +174,45 @@ def main():
             atr = None if np.isnan(atr_val) else atr_val
             if atr is not None and ltp:
                 atr_pct = atr / ltp * 100
-            avg_vol = hist["volume"].mean()
+            avg_vol = float(hist["volume"].mean()) if not hist.empty else None
 
-        try:
-            ws = get_or_create_stock_sheet(spreadsheets[cat], sym)
-            update_static_metrics(ws, sid, volatility, atr, atr_pct, avg_vol)
-            append_live_row(ws, snapshot_time, session, bid, ask, spread, ltp, volume)
-            processed += 1
-        except Exception as e:
-            print(f"  Sheet write error for {sym}: {e}")
+        # Collect live snapshot
+        snapshot_records.append({
+            "Snapshot_Time": now_ist,
+            "Session": session,
+            "Category": cat,
+            "SYMBOL": sym,
+            "security_id": str(sid),
+            "Bid": bid,
+            "Ask": ask,
+            "Spread": spread,
+            "LTP": ltp,
+            "Volume": volume,
+        })
 
-        time.sleep(0.15)
+        # Collect static metrics
+        static_records.append({
+            "SYMBOL": sym,
+            "security_id": str(sid),
+            "Category": cat,
+            "last_history_update": now_ist,
+            "volatility_6m": round(volatility, 2) if volatility else None,
+            "atr_14": round(atr, 2) if atr else None,
+            "atr_pct_of_price": round(atr_pct, 2) if atr_pct else None,
+            "avg_volume_6m": round(avg_vol, 0) if avg_vol else None,
+            "updated_at": now_ist,
+        })
+
+        processed += 1
+
+    # ---- Write everything to BigQuery in two efficient batches ----
+    print("\nWriting to BigQuery...")
+    write_snapshot_records(snapshot_records)
+    write_static_metrics(static_records)
 
     print(f"\n[SUMMARY] History fetch failures: {fetch_failures}/{len(valid)}")
-    print(f"Done. Wrote {processed}/{len(valid)} stock sheets.")
+    print(f"Done. Processed {processed}/{len(valid)} stocks → BigQuery.")
 
 
 if __name__ == "__main__":
-    main()
+    main() 
