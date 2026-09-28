@@ -43,4 +43,4 @@ jobs:
           SHEET_ID_RANGE: ${{ secrets.SHEET_ID_RANGE }}
           SHEET_ID_SMALLCAP: ${{ secrets.SHEET_ID_SMALLCAP }}
           GOOGLE_CREDENTIALS_FILE: credentials/service_account.json
-        run: python main_live.py
+        run: python main.py
