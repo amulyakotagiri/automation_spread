@@ -92,6 +92,7 @@ def fetch_history(fyers, symbol: str, retries: int = 2) -> pd.DataFrame:
 
 def main():
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] Starting full automation with Fyers...")
+    print("Token starts with:", str(config.FYERS_ACCESS_TOKEN)[:30] if config.FYERS_ACCESS_TOKEN else "None")
 
     # Initialize Fyers
     fyers = fyersModel.FyersModel(
@@ -116,22 +117,30 @@ def main():
     session = "Morning" if now_ist.hour < 10 else "Midday" if now_ist.hour < 13 else "Closing"
 
     # ---- Live quotes in batches (Fyers max 50 symbols per call) ----
-    quote_cache = {}
-    all_symbols = [to_fyers_symbol(sym) for sym, _ in valid]
+    # ---- Live quotes in batches (Fyers max 50 symbols per call) ----
+quote_cache = {}
+all_symbols = [to_fyers_symbol(sym) for sym, _ in valid]
 
-    for i in range(0, len(all_symbols), 50):
-        batch = all_symbols[i:i + 50]
-        try:
-            resp = fyers.quotes(data={"symbols": ",".join(batch)})
-            if resp.get("s") == "ok" and "d" in resp:
-                for item in resp["d"]:
-                    # item["n"] is the symbol, item["v"] contains the data
-                    sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
-                    quote_cache[sym] = item.get("v", {})
-        except Exception as e:
-            print(f"Quote batch error: {e}")
-        time.sleep(0.4)
+print(f"FYERS_APP_ID loaded: {bool(config.FYERS_APP_ID)}")
+print(f"FYERS_ACCESS_TOKEN loaded: {bool(config.FYERS_ACCESS_TOKEN)}")
 
+for i in range(0, len(all_symbols), 50):
+    batch = all_symbols[i:i + 50]
+    try:
+        resp = fyers.quotes(data={"symbols": ",".join(batch)})
+        print(f"Quotes batch {i//50 + 1} response status: {resp.get('s')} | message: {resp.get('message', '')}")
+        
+        if resp.get("s") == "ok" and "d" in resp:
+            for item in resp["d"]:
+                sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
+                quote_cache[sym] = item.get("v", {})
+        else:
+            print(f"Full error response: {resp}")
+    except Exception as e:
+        print(f"Quote batch error: {e}")
+    time.sleep(0.5)
+
+print(f"Total quotes received: {len(quote_cache)}")
     # ---- Process each stock ----
     snapshot_records = []
     static_records = []
