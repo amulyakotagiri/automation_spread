@@ -203,7 +203,9 @@ def main():
 
     print(f"\n[SUMMARY] History fetch failures: {fetch_failures}/{len(valid)}")
     print(f"Done. Processed {processed}/{len(valid)} stocks → BigQuery.")
-
+    print("FYERS_APP_ID present:", bool(config.FYERS_APP_ID))
+    print("FYERS_ACCESS_TOKEN present:", bool(config.FYERS_ACCESS_TOKEN))
+    print("Token starts with:", config.FYERS_ACCESS_TOKEN[:20] if config.FYERS_ACCESS_TOKEN else "None")
 
 if __name__ == "__main__":
     main()
