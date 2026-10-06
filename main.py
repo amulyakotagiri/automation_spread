@@ -4,19 +4,15 @@ import time
 import pandas as pd
 import numpy as np
 import pytz
-from dhanhq import DhanContext, dhanhq
+from fyers_apiv3 import fyersModel
 
 import config
 from utils.security_master import get_symbol_map
 from utils.metrics import compute_atr, compute_volatility, compute_trend_score
-from bigquery_helper import write_snapshot_records, write_static_metrics   # ← correct
+from bigquery_helper import write_snapshot_records, write_static_metrics
+
 
 def load_symbols_by_category() -> dict[str, list[str]]:
-    """
-    Load symbols from every relevant sheet, keeping category so each
-    stock can be routed to the right spreadsheet (MidCap / Range /
-    SmallCap). Sheet-name matching mirrors the depth-snapshot script.
-    """
     path = Path(config.SYMBOLS_FILE)
     if not path.exists():
         raise FileNotFoundError(f"Excel file not found: {path}")
@@ -49,122 +45,118 @@ def load_symbols_by_category() -> dict[str, list[str]]:
     return categories
 
 
-def fetch_history(dhan, security_id: str, retries: int = 2) -> pd.DataFrame:
-    """
-    Fetch daily OHLCV history for one stock.
+def to_fyers_symbol(symbol: str) -> str:
+    """Convert RELIANCE → NSE:RELIANCE-EQ"""
+    return f"NSE:{symbol}-EQ"
 
-    dhan.historical_daily_data() returns the full API envelope —
-    {"status": "success", "data": {"close": [...], "open": [...], ...}} —
-    not the OHLCV arrays directly, so we must unwrap resp["data"].
-    """
+
+def fetch_history(fyers, symbol: str, retries: int = 2) -> pd.DataFrame:
+    """Fetch daily OHLCV history using Fyers."""
     to_dt = datetime.now().date()
     from_dt = to_dt - timedelta(days=config.HISTORY_DAYS)
 
+    data = {
+        "symbol": to_fyers_symbol(symbol),
+        "resolution": "D",
+        "date_format": "1",
+        "range_from": from_dt.strftime("%Y-%m-%d"),
+        "range_to": to_dt.strftime("%Y-%m-%d"),
+        "cont_flag": "1"
+    }
+
     for attempt in range(retries + 1):
         try:
-            resp = dhan.historical_daily_data(
-                security_id=str(security_id),
-                exchange_segment="NSE_EQ",
-                instrument_type="EQUITY",
-                from_date=from_dt.strftime("%Y-%m-%d"),
-                to_date=to_dt.strftime("%Y-%m-%d")
-            )
-            if not resp or resp.get("status") != "success":
+            resp = fyers.history(data=data)
+            if resp.get("s") != "ok" or "candles" not in resp:
                 if attempt < retries:
                     time.sleep(1)
                     continue
                 return pd.DataFrame()
 
-            data = resp.get("data") or {}
-            if not data or "close" not in data or len(data["close"]) == 0:
+            candles = resp["candles"]
+            if not candles:
                 return pd.DataFrame()
 
-            return pd.DataFrame({
-                "open": data["open"],
-                "high": data["high"],
-                "low": data["low"],
-                "close": data["close"],
-                "volume": data.get("volume", [0] * len(data["close"]))
-            })
+            # Fyers candles format: [timestamp, open, high, low, close, volume]
+            df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            return df[["open", "high", "low", "close", "volume"]]
         except Exception as e:
             if attempt < retries:
                 time.sleep(1)
                 continue
-            print(f"  History error {security_id}: {e}")
+            print(f"  History error {symbol}: {e}")
             return pd.DataFrame()
 
     return pd.DataFrame()
 
 
 def main():
-    print(f"[{datetime.now():%Y-%m-%d %H:%M}] Starting full automation for all stocks...")
+    print(f"[{datetime.now():%Y-%m-%d %H:%M}] Starting full automation with Fyers...")
 
-    dhan = dhanhq(DhanContext(config.DHAN_CLIENT_ID, config.DHAN_ACCESS_TOKEN))
-    symbol_map = get_symbol_map()
+    # Initialize Fyers
+    fyers = fyersModel.FyersModel(
+        client_id=config.FYERS_APP_ID,
+        token=config.FYERS_ACCESS_TOKEN,
+        is_async=False,
+        log_path=""
+    )
+
+    symbol_map = get_symbol_map()          # still useful for security_id if needed
     categories = load_symbols_by_category()
 
-    # Flatten to one list for batched quote fetching, but keep category
-    # alongside each symbol so we know which category it belongs to.
-    valid = []  # (symbol, security_id, category)
+    valid = []  # (symbol, category)
     for cat, symbols in categories.items():
         for sym in symbols:
-            sid = symbol_map.get(sym)
-            if sid:
-                valid.append((sym, sid, cat))
-            else:
-                print(f"  Missing security_id -> {sym}")
+            valid.append((sym, cat))
 
-    print(f"Processing {len(valid)} stocks with valid Dhan IDs...")
+    print(f"Processing {len(valid)} stocks...")
 
     ist = pytz.timezone("Asia/Kolkata")
     now_ist = datetime.now(ist)
-    snapshot_time = now_ist.strftime("%Y-%m-%d %H:%M:%S")
     session = "Morning" if now_ist.hour < 10 else "Midday" if now_ist.hour < 13 else "Closing"
 
-    # ---- Live quotes in batches (across all categories at once) ----
+    # ---- Live quotes in batches (Fyers max 50 symbols per call) ----
     quote_cache = {}
-    sids = [sid for _, sid, _ in valid]
+    all_symbols = [to_fyers_symbol(sym) for sym, _ in valid]
 
-    for i in range(0, len(sids), config.BATCH_SIZE_QUOTES):
-        batch = sids[i:i + config.BATCH_SIZE_QUOTES]
+    for i in range(0, len(all_symbols), 50):
+        batch = all_symbols[i:i + 50]
         try:
-            resp = dhan.quote_data(securities={"NSE_EQ": batch})
-            data = resp.get("data", resp) if isinstance(resp, dict) else {}
-            for sid, q in data.items():
-                quote_cache[str(sid)] = q
+            resp = fyers.quotes(data={"symbols": ",".join(batch)})
+            if resp.get("s") == "ok" and "d" in resp:
+                for item in resp["d"]:
+                    # item["n"] is the symbol, item["v"] contains the data
+                    sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
+                    quote_cache[sym] = item.get("v", {})
         except Exception as e:
             print(f"Quote batch error: {e}")
         time.sleep(0.4)
 
-    # ---- Process each stock and collect records ----
+    # ---- Process each stock ----
     snapshot_records = []
     static_records = []
     fetch_failures = 0
     processed = 0
 
-    for idx, (sym, sid, cat) in enumerate(valid, 1):
+    for idx, (sym, cat) in enumerate(valid, 1):
         if idx % 100 == 0 or idx == len(valid):
-            print(f"[{idx}/{len(valid)}] {sym} ({cat}) | "
-                  f"History fetch failures so far: {fetch_failures}")
+            print(f"[{idx}/{len(valid)}] {sym} ({cat}) | History failures: {fetch_failures}")
 
-        q = quote_cache.get(str(sid), {})
-        ltp = q.get("last_price") or q.get("LTP") or q.get("ltp")
-        volume = q.get("volume") or q.get("total_volume")
+        q = quote_cache.get(sym, {})
+        ltp = q.get("lp") or q.get("ltp")
+        volume = q.get("volume") or q.get("v")
+        bid = q.get("bid")
+        ask = q.get("ask")
+        spread = None
+        if bid is not None and ask is not None:
+            try:
+                spread = round(float(ask) - float(bid), 4)
+            except:
+                pass
 
-        bid = ask = spread = None
-        depth = q.get("depth") or q.get("market_depth") or {}
-        try:
-            if "buy" in depth and depth["buy"]:
-                bid = depth["buy"][0].get("price")
-            if "sell" in depth and depth["sell"]:
-                ask = depth["sell"][0].get("price")
-            if bid is not None and ask is not None:
-                spread = round(ask - bid, 4)
-        except Exception:
-            pass
-
+        # History + metrics
         volatility = atr = atr_pct = avg_vol = None
-        hist = fetch_history(dhan, sid)
+        hist = fetch_history(fyers, sym)
         if hist.empty:
             fetch_failures += 1
         else:
@@ -172,16 +164,17 @@ def main():
             atr_val = compute_atr(hist, config.ATR_PERIOD)
             atr = None if np.isnan(atr_val) else atr_val
             if atr is not None and ltp:
-                atr_pct = atr / ltp * 100
+                atr_pct = atr / float(ltp) * 100
             avg_vol = float(hist["volume"].mean()) if not hist.empty else None
 
-        # Collect live snapshot
+        security_id = symbol_map.get(sym, "")
+
         snapshot_records.append({
             "Snapshot_Time": now_ist,
             "Session": session,
             "Category": cat,
             "SYMBOL": sym,
-            "security_id": str(sid),
+            "security_id": str(security_id),
             "Bid": bid,
             "Ask": ask,
             "Spread": spread,
@@ -189,10 +182,9 @@ def main():
             "Volume": volume,
         })
 
-        # Collect static metrics
         static_records.append({
             "SYMBOL": sym,
-            "security_id": str(sid),
+            "security_id": str(security_id),
             "Category": cat,
             "last_history_update": now_ist,
             "volatility_6m": round(volatility, 2) if volatility else None,
@@ -204,7 +196,7 @@ def main():
 
         processed += 1
 
-    # ---- Write everything to BigQuery in two efficient batches ----
+    # ---- Write to BigQuery ----
     print("\nWriting to BigQuery...")
     write_snapshot_records(snapshot_records)
     write_static_metrics(static_records)
@@ -214,4 +206,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
