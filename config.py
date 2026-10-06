@@ -49,6 +49,8 @@ ATR_PERIOD = 14
 BATCH_SIZE = 70
 BATCH_SIZE_QUOTES = 70
 
-# Airtable (used by other scripts in this repo, not main_live.py)
-AIRTABLE_TOKEN   = os.getenv("AIRTABLE_TOKEN")
-AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+# Fyers
+FYERS_APP_ID       = os.getenv("FYERS_APP_ID")
+FYERS_SECRET_ID    = os.getenv("FYERS_SECRET_ID")
+FYERS_ACCESS_TOKEN = os.getenv("FYERS_ACCESS_TOKEN")
+FYERS_REDIRECT_URI = os.getenv("FYERS_REDIRECT_URI", "https://trade.fyers.in/api-login/redirect-uri/index.html")
