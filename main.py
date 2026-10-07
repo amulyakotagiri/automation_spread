@@ -125,8 +125,9 @@ def main():
         batch = all_symbols[i:i + 50]
         try:
             resp = fyers.quotes(data={"symbols": ",".join(batch)})
-            print(f"Quotes batch {i//50 + 1} response status: {resp.get('s')} | message: {resp.get('message', '')}")
-
+            print(f"Quotes batch {i//50 + 1} FULL RESPONSE: {resp}")
+            if i == 0:
+                print("First batch symbols:", batch[:5])   # print only first 5 for readability
             if resp.get("s") == "ok" and "d" in resp:
                 for item in resp["d"]:
                     sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
