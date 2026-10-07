@@ -127,11 +127,11 @@ def main():
             resp = fyers.quotes(data={"symbols": ",".join(batch)})
             print(f"Quotes batch {i//50 + 1} response status: {resp.get('s')} | message: {resp.get('message', '')}")
 
-           if resp.get("s") == "ok" and "d" in resp:
+            if resp.get("s") == "ok" and "d" in resp:
                 for item in resp["d"]:
                     sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
                     quote_cache[sym] = item.get("v", {})
-            
+
                     # Temporary debug - print only the first few
                     if len(quote_cache) <= 3:
                         print(f"DEBUG Symbol: {sym}")
