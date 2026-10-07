@@ -127,12 +127,17 @@ def main():
             resp = fyers.quotes(data={"symbols": ",".join(batch)})
             print(f"Quotes batch {i//50 + 1} response status: {resp.get('s')} | message: {resp.get('message', '')}")
 
-            if resp.get("s") == "ok" and "d" in resp:
+           if resp.get("s") == "ok" and "d" in resp:
                 for item in resp["d"]:
                     sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
                     quote_cache[sym] = item.get("v", {})
-            else:
-                print(f"Full error response: {resp}")
+            
+                    # Temporary debug - print only the first few
+                    if len(quote_cache) <= 3:
+                        print(f"DEBUG Symbol: {sym}")
+                        print(f"DEBUG Full item: {item}")
+                        print(f"DEBUG v keys: {list(item.get('v', {}).keys())}")
+                        print("---")
         except Exception as e:
             print(f"Quote batch error: {e}")
         time.sleep(0.5)
