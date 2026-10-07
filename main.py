@@ -94,6 +94,8 @@ def main():
     print("Token starts with:", str(config.FYERS_ACCESS_TOKEN)[:30] if config.FYERS_ACCESS_TOKEN else "None")
     print("FYERS_APP_ID present:", bool(config.FYERS_APP_ID))
     print("FYERS_ACCESS_TOKEN present:", bool(config.FYERS_ACCESS_TOKEN))
+    print("Client ID being used:", config.FYERS_APP_ID)
+    print("Token length:", len(config.FYERS_ACCESS_TOKEN) if config.FYERS_ACCESS_TOKEN else 0)
 
     # Initialize Fyers
     fyers = fyersModel.FyersModel(
@@ -102,6 +104,14 @@ def main():
         is_async=False,
         log_path=""
     )
+
+    # ---- TEMPORARY SINGLE SYMBOL TEST ----
+    print("\n----- TEMPORARY TEST -----")
+    print("Testing with single symbol NSE:RELIANCE-EQ ...")
+    test_data = {"symbols": "NSE:RELIANCE-EQ"}
+    resp = fyers.quotes(data=test_data)
+    print("Single symbol response:", resp)
+    print("-----------------------------\n")
 
     symbol_map = get_symbol_map()
     categories = load_symbols_by_category()
@@ -117,31 +127,9 @@ def main():
     now_ist = datetime.now(ist)
     session = "Morning" if now_ist.hour < 10 else "Midday" if now_ist.hour < 13 else "Closing"
 
-    # ---- Live quotes in batches (Fyers max 50 symbols per call) ----
+    # ---- Live quotes in batches (currently disabled for testing) ----
     quote_cache = {}
-    all_symbols = [to_fyers_symbol(sym) for sym, _ in valid]
-
-    for i in range(0, len(all_symbols), 50):
-        batch = all_symbols[i:i + 50]
-        try:
-            resp = fyers.quotes(data={"symbols": ",".join(batch)})
-            print(f"Quotes batch {i//50 + 1} FULL RESPONSE: {resp}")
-            if i == 0:
-                print("First batch symbols:", batch[:5])   # print only first 5 for readability
-            if resp.get("s") == "ok" and "d" in resp:
-                for item in resp["d"]:
-                    sym = item.get("n", "").replace("NSE:", "").replace("-EQ", "")
-                    quote_cache[sym] = item.get("v", {})
-
-                    # Temporary debug - print only the first few
-                    if len(quote_cache) <= 3:
-                        print(f"DEBUG Symbol: {sym}")
-                        print(f"DEBUG Full item: {item}")
-                        print(f"DEBUG v keys: {list(item.get('v', {}).keys())}")
-                        print("---")
-        except Exception as e:
-            print(f"Quote batch error: {e}")
-        time.sleep(0.5)
+    # (We skip the real batch quotes for now until the single test works)
 
     print(f"Total quotes received: {len(quote_cache)}")
 
