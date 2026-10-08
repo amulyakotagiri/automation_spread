@@ -98,13 +98,15 @@ def main():
     print("Token length:", len(config.FYERS_ACCESS_TOKEN) if config.FYERS_ACCESS_TOKEN else 0)
 
     # Initialize Fyers
+    # Try with AppID:Token format
+    combined_token = f"{config.FYERS_APP_ID}:{config.FYERS_ACCESS_TOKEN}"
+
     fyers = fyersModel.FyersModel(
         client_id=config.FYERS_APP_ID,
-        token=config.FYERS_ACCESS_TOKEN,
+        token=combined_token,
         is_async=False,
         log_path=""
     )
-
     # ---- TEMPORARY SINGLE SYMBOL TEST ----
     print("\n----- TEMPORARY TEST -----")
     print("Testing with single symbol NSE:RELIANCE-EQ ...")
