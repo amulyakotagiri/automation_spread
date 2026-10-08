@@ -112,6 +112,7 @@ def main():
     print("Testing with single symbol NSE:RELIANCE-EQ ...")
     test_data = {"symbols": "NSE:RELIANCE-EQ"}
     resp = fyers.quotes(data=test_data)
+    print("Using combined token starts with:", combined_token[:40])
     print("Single symbol response:", resp)
     print("-----------------------------\n")
 
