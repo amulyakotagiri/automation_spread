@@ -20,8 +20,9 @@ from bigquery_helper import (
 # SETTINGS
 # ============================================================
 QUOTE_BATCH_SIZE = 50
-API_DELAY_SECONDS = 1.25
+API_DELAY_SECONDS = 1.3          # safe delay for Fyers
 MAX_RETRIES = 2
+
 # ============================================================
 # INVALID SYMBOLS (Fyers returns "Invalid symbol provided")
 # ============================================================
@@ -32,6 +33,7 @@ INVALID_FYERS_SYMBOLS = {
     "LOTUSDEV",
     "STLTECH",
 }
+
 # ============================================================
 # LOAD SYMBOLS FROM EXCEL
 # ============================================================
@@ -52,7 +54,7 @@ def load_symbols_by_category() -> dict[str, list[str]]:
     for sheet in xls.sheet_names:
         lower = sheet.lower().strip()
 
-        # Skip any Universe / Dhan related sheets
+        # Skip Universe / Dhan related sheets
         if any(x in lower for x in ["universe", "dhan", "dhanhq"]):
             print(f"Skipping sheet (Universe/Dhan): {sheet}")
             continue
@@ -89,12 +91,10 @@ def load_symbols_by_category() -> dict[str, list[str]]:
             .tolist()
         )
 
-        # Remove empty + known invalid Fyers symbols
         cleaned = [
             s for s in symbols
             if s and s != "NAN" and s not in INVALID_FYERS_SYMBOLS
         ]
-
         categories[category].extend(cleaned)
 
     for category in categories:
@@ -126,13 +126,9 @@ def print_fyers_error(response, operation: str, symbol: str = ""):
     print("=" * 70 + "\n")
 
 # ============================================================
-# TEST FYERS CONNECTION  ← UPDATED WITH get_profile()
+# TEST FYERS CONNECTION
 # ============================================================
 def test_fyers_connection(fyers):
-    """
-    Test Profile + Quotes + History using RELIANCE.
-    We stop the program if authentication is clearly broken.
-    """
     test_symbol = "NSE:RELIANCE-EQ"
 
     print("\n")
@@ -140,52 +136,39 @@ def test_fyers_connection(fyers):
     print("FYERS CONNECTION TEST")
     print("=" * 70)
 
-    # --------------------------------------------------------
-    # 1. PROFILE TEST (most important)
-    # --------------------------------------------------------
+    # 1. Profile
     print("\n1. Testing get_profile() ...")
     try:
         profile_response = fyers.get_profile()
         print("Profile response:")
         print(profile_response)
-
         if profile_response.get("s") == "ok":
             print("✓ FYERS Profile API is working (token is valid)")
         else:
             print_fyers_error(profile_response, "PROFILE")
-            print("\nSTOPPING HERE.")
-            print("Access token is invalid / expired / wrong App.")
-            print("Generate a fresh access token first.")
+            print("\nSTOPPING HERE. Access token is invalid/expired.")
             return False
     except Exception as e:
         print(f"Profile API exception: {type(e).__name__}: {e}")
         return False
 
-    # --------------------------------------------------------
-    # 2. QUOTES TEST
-    # --------------------------------------------------------
+    # 2. Quotes
     print(f"\n2. Testing Quotes API with {test_symbol}")
-    quote_request = {"symbols": test_symbol}
     try:
-        quote_response = fyers.quotes(data=quote_request)
+        quote_response = fyers.quotes(data={"symbols": test_symbol})
         print("Quotes response:")
         print(quote_response)
-
         if quote_response.get("s") == "ok":
             print("✓ FYERS Quotes API is working")
         else:
             print_fyers_error(quote_response, "QUOTES", test_symbol)
-            print("WARNING: Quotes API failed.")
     except Exception as e:
         print(f"Quotes API exception: {type(e).__name__}: {e}")
 
-    # --------------------------------------------------------
-    # 3. HISTORY TEST
-    # --------------------------------------------------------
+    # 3. History
     print(f"\n3. Testing History API with {test_symbol}")
     today = datetime.now().date()
     from_date = today - timedelta(days=10)
-
     range_from = int(datetime.combine(from_date, datetime.min.time()).timestamp())
     range_to = int(datetime.combine(today, datetime.max.time()).timestamp())
 
@@ -197,7 +180,6 @@ def test_fyers_connection(fyers):
         "range_to": str(range_to),
         "cont_flag": "1",
     }
-
     print("History request:")
     print(history_request)
 
@@ -205,14 +187,11 @@ def test_fyers_connection(fyers):
         history_response = fyers.history(data=history_request)
         print("History response:")
         print(history_response)
-
         if history_response.get("s") == "ok":
             candles = history_response.get("candles", [])
             print(f"✓ FYERS History API is working ({len(candles)} candles)")
         else:
             print_fyers_error(history_response, "HISTORY", test_symbol)
-            print("\nSTOPPING HERE.")
-            print("The FYERS History API is not working.")
             return False
     except Exception as e:
         print(f"History API exception: {type(e).__name__}: {e}")
@@ -281,10 +260,18 @@ def fetch_quotes_batch(fyers, symbols: list[str]) -> dict:
             time.sleep(API_DELAY_SECONDS)
 
     print(f"\nTotal quotes received: {len(quote_cache)}")
+
+    # Sample verification
+    print("\nSample of live quotes received:")
+    sample_symbols = list(quote_cache.keys())[:5]
+    for sym in sample_symbols:
+        q = quote_cache[sym]
+        print(f"  {sym}: LTP={q.get('lp')}  Bid={q.get('bid')}  Ask={q.get('ask')}  Vol={q.get('volume')}")
+
     return quote_cache
 
 # ============================================================
-# FETCH DAILY HISTORY
+# FETCH DAILY HISTORY (with proper 429 handling)
 # ============================================================
 def fetch_history(fyers, symbol: str, retries: int = MAX_RETRIES) -> pd.DataFrame:
     today = datetime.now().date()
@@ -307,9 +294,17 @@ def fetch_history(fyers, symbol: str, retries: int = MAX_RETRIES) -> pd.DataFram
     for attempt in range(retries + 1):
         try:
             response = fyers.history(data=request_data)
+
             if response.get("s") != "ok":
-                if attempt == retries:
-                    print_fyers_error(response, "HISTORY", symbol)
+                code = response.get("code")
+
+                if code == 429:
+                    print(f"Rate limit hit on {symbol} — sleeping 5 seconds...")
+                    time.sleep(5)
+                else:
+                    if attempt == retries:
+                        print_fyers_error(response, "HISTORY", symbol)
+
                 if attempt < retries:
                     time.sleep(API_DELAY_SECONDS)
                     continue
@@ -358,25 +353,18 @@ def extract_quote_values(quote: dict):
 def main():
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] Starting full automation with Fyers...")
 
-    # ========================================================
-    # CONFIGURATION CHECK
-    # ========================================================
+    # Configuration check
     print("\nConfiguration check:")
     print("FYERS_APP_ID present:", bool(config.FYERS_APP_ID))
     print("FYERS_ACCESS_TOKEN present:", bool(config.FYERS_ACCESS_TOKEN))
-    print(
-        "Token length:",
-        len(config.FYERS_ACCESS_TOKEN) if config.FYERS_ACCESS_TOKEN else 0
-    )
+    print("Token length:", len(config.FYERS_ACCESS_TOKEN) if config.FYERS_ACCESS_TOKEN else 0)
 
     if not config.FYERS_APP_ID:
         raise RuntimeError("FYERS_APP_ID is missing.")
     if not config.FYERS_ACCESS_TOKEN:
         raise RuntimeError("FYERS_ACCESS_TOKEN is missing.")
 
-    # ========================================================
-    # INITIALIZE FYERS
-    # ========================================================
+    # Initialize Fyers
     fyers = fyersModel.FyersModel(
         client_id=config.FYERS_APP_ID,
         token=config.FYERS_ACCESS_TOKEN,
@@ -384,26 +372,19 @@ def main():
         log_path=""
     )
 
-    # ========================================================
-    # TEST FYERS BEFORE PROCESSING 533 STOCKS
-    # ========================================================
+    # Connection test
     if not test_fyers_connection(fyers):
         raise RuntimeError(
             "\nFYERS connection test failed.\n"
-            "Fix the token / App permissions / redirect URL first.\n"
-            "The workflow was intentionally stopped."
+            "Fix the token / App permissions first."
         )
 
-    # ========================================================
-    # LOAD SECURITY MASTER
-    # ========================================================
+    # Security master
     print("\nDownloading Dhan Security Master...")
     symbol_map = get_symbol_map()
     print(f"Security master symbols: {len(symbol_map)}")
 
-    # ========================================================
-    # LOAD EXCEL SYMBOLS
-    # ========================================================
+    # Load symbols
     categories = load_symbols_by_category()
     valid = []
     for category, symbols in categories.items():
@@ -412,9 +393,7 @@ def main():
 
     print(f"\nProcessing {len(valid)} stocks...")
 
-    # ========================================================
-    # MARKET SESSION
-    # ========================================================
+    # Session
     ist = pytz.timezone("Asia/Kolkata")
     now_ist = datetime.now(ist)
     if now_ist.hour < 10:
@@ -424,15 +403,11 @@ def main():
     else:
         session = "Closing"
 
-    # ========================================================
-    # FETCH LIVE QUOTES
-    # ========================================================
-    all_symbols = [symbol for symbol, category in valid]
+    # Live quotes
+    all_symbols = [symbol for symbol, _ in valid]
     quote_cache = fetch_quotes_batch(fyers, all_symbols)
 
-    # ========================================================
-    # PROCESS STOCKS
-    # ========================================================
+    # Process stocks
     snapshot_records = []
     static_records = []
     fetch_failures = 0
@@ -462,6 +437,9 @@ def main():
         avg_vol = None
 
         hist = fetch_history(fyers, symbol)
+
+        # Always respect rate limit
+        time.sleep(API_DELAY_SECONDS)
 
         if hist.empty:
             fetch_failures += 1
@@ -535,9 +513,7 @@ def main():
                 f"History failures: {fetch_failures}"
             )
 
-    # ========================================================
-    # WRITE TO BIGQUERY
-    # ========================================================
+    # Write to BigQuery
     print("\n")
     print("=" * 70)
     print("WRITING TO BIGQUERY")
@@ -548,9 +524,7 @@ def main():
     write_snapshot_records(snapshot_records)
     write_static_metrics(static_records)
 
-    # ========================================================
-    # FINAL SUMMARY
-    # ========================================================
+    # Final summary
     print("\n")
     print("=" * 70)
     print("FINAL SUMMARY")
