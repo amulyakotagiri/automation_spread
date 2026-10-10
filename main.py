@@ -22,25 +22,41 @@ from bigquery_helper import (
 QUOTE_BATCH_SIZE = 50
 API_DELAY_SECONDS = 1.25
 MAX_RETRIES = 2
-
+# ============================================================
+# INVALID SYMBOLS (Fyers returns "Invalid symbol provided")
+# ============================================================
+INVALID_FYERS_SYMBOLS = {
+    "DIACABS",
+    "HEG",
+    "HFCL",
+    "LOTUSDEV",
+    "STLTECH",
+}
 # ============================================================
 # LOAD SYMBOLS FROM EXCEL
 # ============================================================
 def load_symbols_by_category() -> dict[str, list[str]]:
     path = Path(config.SYMBOLS_FILE)
     if not path.exists():
-        raise FileNotFoundError(
-            f"Excel file not found: {path.resolve()}"
-        )
+        raise FileNotFoundError(f"Excel file not found: {path.resolve()}")
+
     print(f"Loading symbols from: {path}")
     xls = pd.ExcelFile(path)
+
     categories = {
         "MidCap": [],
         "Range_100_1000": [],
         "SmallCap": [],
     }
+
     for sheet in xls.sheet_names:
-        lower = sheet.lower()
+        lower = sheet.lower().strip()
+
+        # Skip any Universe / Dhan related sheets
+        if any(x in lower for x in ["universe", "dhan", "dhanhq"]):
+            print(f"Skipping sheet (Universe/Dhan): {sheet}")
+            continue
+
         if "midcap" in lower:
             category = "MidCap"
         elif "range" in lower:
@@ -48,17 +64,22 @@ def load_symbols_by_category() -> dict[str, list[str]]:
         elif "small" in lower:
             category = "SmallCap"
         else:
+            print(f"Skipping unknown sheet: {sheet}")
             continue
+
         df = pd.read_excel(xls, sheet_name=sheet, header=1)
+
         symbol_column = None
         for col in df.columns:
             col_name = str(col).strip().upper()
             if col_name in ["SYMBOL", "SYMBOLS"]:
                 symbol_column = col
                 break
+
         if symbol_column is None:
             print(f"WARNING: No SYMBOL column found in sheet {sheet}")
             continue
+
         symbols = (
             df[symbol_column]
             .dropna()
@@ -67,16 +88,19 @@ def load_symbols_by_category() -> dict[str, list[str]]:
             .str.upper()
             .tolist()
         )
-        categories[category].extend(symbols)
+
+        # Remove empty + known invalid Fyers symbols
+        cleaned = [
+            s for s in symbols
+            if s and s != "NAN" and s not in INVALID_FYERS_SYMBOLS
+        ]
+
+        categories[category].extend(cleaned)
+
     for category in categories:
-        categories[category] = sorted(
-            set(
-                symbol
-                for symbol in categories[category]
-                if symbol and symbol != "NAN"
-            )
-        )
+        categories[category] = sorted(set(categories[category]))
         print(f"Loaded {len(categories[category])} unique symbols for {category}")
+
     return categories
 
 # ============================================================
