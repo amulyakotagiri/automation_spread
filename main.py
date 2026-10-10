@@ -334,16 +334,23 @@ def fetch_history(fyers, symbol: str, retries: int = MAX_RETRIES) -> pd.DataFram
     return pd.DataFrame()
 
 # ============================================================
-# EXTRACT QUOTE VALUES
+# EXTRACT QUOTE VALUES (FIXED)
 # ============================================================
 def extract_quote_values(quote: dict):
     if not quote:
         return None, None, None, None
 
-    ltp = quote.get("lp") or quote.get("ltp")
-    volume = quote.get("volume") or quote.get("v")
-    bid = quote.get("bid") or quote.get("bid_price")
-    ask = quote.get("ask") or quote.get("ask_price")
+    # Handle explicit key retrieval without short-circuiting 0/0.0
+    ltp = quote.get("lp") if "lp" in quote else quote.get("ltp")
+    volume = quote.get("volume") if "volume" in quote else quote.get("v")
+    bid = quote.get("bid") if "bid" in quote else quote.get("bid_price")
+    ask = quote.get("ask") if "ask" in quote else quote.get("ask_price")
+
+    # Cast values safely to float/int
+    ltp = float(ltp) if ltp is not None else None
+    volume = int(volume) if volume is not None else None
+    bid = float(bid) if bid is not None else None
+    ask = float(ask) if ask is not None else None
 
     return ltp, volume, bid, ask
 
@@ -422,7 +429,7 @@ def main():
         quote = quote_cache.get(symbol, {})
         ltp, volume, bid, ask = extract_quote_values(quote)
 
-        # Spread
+        # Spread calculation
         spread = None
         if bid is not None and ask is not None:
             try:
@@ -430,7 +437,7 @@ def main():
             except Exception:
                 spread = None
 
-        # History
+        # History calculations
         volatility = None
         atr = None
         atr_pct = None
@@ -471,21 +478,29 @@ def main():
 
         security_id = symbol_map.get(symbol, "")
 
+        # Key names formatted in both snake_case/lowercase and exact BigQuery matches
         snapshot_records.append({
             "Snapshot_Time": now_ist,
             "Session": session,
             "Category": category,
             "SYMBOL": symbol,
+            "symbol": symbol,
             "security_id": str(security_id),
             "Bid": bid,
+            "bid": bid,
             "Ask": ask,
+            "ask": ask,
             "Spread": spread,
+            "spread": spread,
             "LTP": ltp,
+            "ltp": ltp,
             "Volume": volume,
+            "volume": volume,
         })
 
         static_records.append({
             "SYMBOL": symbol,
+            "symbol": symbol,
             "security_id": str(security_id),
             "Category": category,
             "last_history_update": now_ist,
